@@ -2,26 +2,35 @@
 # script to show current sunrise and sunset for an arbitrary location in the states
 # requires lynx
 # written by david seelig, 2005
-
 use strict;
 
+my $no_date_time = 0;
+eval {
+  require DateTime
+};
+if($@) {
+  print "Can't find the DateTime module which I need for DST calculations.\n";
+  print "Make sure you add an hour if you're in DST\n";
+  $no_date_time = 1;
+}
+
 my $date = `date +'%m/%d/%Y'`;
-my $city = 'minneapolis';
-my $state = 'mn';
+my $city = 'Minneapolis';
+my $state = 'MN';
 my %monHash;
 
-$monHash{Jan} = 1;
-$monHash{Feb} = 2;
-$monHash{Mar} = 3;
-$monHash{Apr} = 4;
-$monHash{May} = 5;
-$monHash{Jun} = 6;
-$monHash{Jul} = 7;
-$monHash{Aug} = 8;
-$monHash{Sep} = 9;
-$monHash{Oct} = 10;
-$monHash{Nov} = 11;
-$monHash{Dec} = 12;
+$monHash{January}   = 1;
+$monHash{February}  = 2;
+$monHash{March}     = 3;
+$monHash{April}     = 4;
+$monHash{May}       = 5;
+$monHash{June}      = 6;
+$monHash{July}      = 7;
+$monHash{August}    = 8;
+$monHash{September} = 9;
+$monHash{October}   = 10;
+$monHash{November}  = 11;
+$monHash{December}  = 12;
 
 if ( ($ARGV[0]) and ($ARGV[0] eq '-h') ) { die "Usage: $0 [city] [state] [mm/dd/yyyy]\nDefaults: $city, $state, $date\n"; }
 
@@ -40,52 +49,60 @@ foreach my $arg (@ARGV) {
 chomp($date);
 print "$city, $state $date\n";
 my ($month,$day,$year) = split("/", $date);
+my $URL    = "http://aa.usno.navy.mil/cgi-bin/aa_rstablew.pl?FFX=1&xxy=$year&st=$state&place=$city&type=0&ZZZ=END";
 
-my $URL    = "http://aa.usno.navy.mil/cgi-bin/aa_rstablew.pl?FFX=1&year=" . $year . "&type=0&st=" . $state . "&place=" . $city . "&ZZZ=END";
-
-#################################################################################################
+#-------------------------------------------------------------------------------- 
 # daylight savings time compensation section added by kevin deronne
-#################################################################################################
+#-------------------------------------------------------------------------------- 
 #$gmtstring = `date --utc`;
 #$dststring = `date`;
-my $DSTURL = "http://aa.usno.navy.mil/faq/docs/daylight_time.html";
-my $dstline = `lynx -source '$DSTURL' | grep \"In $year\"`;
-my ($dstbeginmon, $dstbeginday, $dstendmon, $dstendday) = ($dstline =~ /begins on (.*) (.*) and ends on (.*) (.*)\./);
-$dstbeginmon = substr($dstbeginmon,0,3);
-$dstendmon   = substr($dstendmon,0,3);
-$dstbeginmon = $monHash{$dstbeginmon};
-$dstendmon   = $monHash{$dstendmon};
-
 my $dst = 0;
-# If we haven't entered DST yet, or
-if($month < $dstbeginmon) {  
-	#print "No DST .. month < begin\n";
-	$dst = 0;
-}
-elsif($month == $dstbeginmon and $day < $dstbeginday) {
-	#print "No DST .. in begin month, before begin day\n";
-	$dst = 0;
-}
-# here we know we're past dst's begin day 
-elsif($month >= $dstbeginmon and $month < $dstendmon) {
-	#print "DST equal or past begin month, before end month\n";
-	$dst = 1;
-}
-elsif($month == $dstendmon and $day < $dstendday) {
-	#print "DST in end month, before end day\n";
-	$dst = 1;
-}
-else {
-	#print "No DST past end month, before begin month\n";
-	$dst = 0;
+if($no_date_time == 0) {
+  my ($dst_begin_month, $dst_begin_day, $dst_end_month, $dst_end_day);
+  my $DSTURL  = "http://aa.usno.navy.mil/faq/docs/daylight_time.php";
+  my @dstline = `lynx -source '$DSTURL'`;
+  my $capture = 0;
+  for(my $i=0; $i<@dstline; $i++) {
+    my $line = $dstline[$i];
+    if($line =~ /cellpadding="5"/) {
+      $capture = 1; 
+    }
+    if($capture) {
+      if($line =~ /<\/table/) {
+        $capture = 0;
+      }
+      $line =~ /<td>(.*)<\/td>/;
+      if(defined($1)) {
+        if($1 eq $year) {
+          $dstline[$i+1]   =~ /<td>(.*?) (.*?)<\/td>/;
+          $dst_begin_month = $monHash{$1}; 
+          $dst_begin_day   = $2;
+          $dstline[$i+2]   =~ /<td>(.*?) (.*?)<\/td>/;
+          $dst_end_month   = $monHash{$1}; 
+          $dst_end_day     = $2;
+  
+          #print "DST begins on $dst_begin_month $dst_begin_day\n";
+          #print "DST ends on $dst_end_month $dst_end_day\n";
+        }
+      }
+    }
+  }
+  
+  my $current_dt   = DateTime->new({'year' => $year, 'month' => $month, 'day' => $day});
+  my $dst_begin_dt = DateTime->new({'year' => $year, 'month' => $dst_begin_month, 'day' => $dst_begin_day});
+  my $dst_end_dt   = DateTime->new({'year' => $year, 'month' => $dst_end_month,   'day' => $dst_end_day});
+  my $dst_begin_result = DateTime->compare( $current_dt, $dst_begin_dt );
+  my $dst_end_result   = DateTime->compare( $current_dt, $dst_end_dt   );
+  if($dst_begin_result >= 0 && $dst_end_result <= 0) {
+    $dst = 1;
+  }
 }
 
-my $line;
+#print "Getting url: $URL\n";
 open(TmpFile, " lynx -source '$URL' |");
-
 while (<TmpFile>) {
-
-    $line = $_;  
+    #print $_;
+    my $line = $_;  
     if ($line =~ m/^$day/) {
         $line =~ s/^.{4}//;
         my $month_start_char = ($month-1) * 11;
